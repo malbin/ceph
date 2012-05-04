@@ -4490,10 +4490,8 @@ void OSD::handle_pg_scan(OpRequestRef op)
   pg = _lookup_lock_pg(m->pgid);
   assert(pg);
 
-  pg->get();
   enqueue_op(pg, op);
   pg->unlock();
-  pg->put();
 }
 
 void OSD::handle_pg_backfill(OpRequestRef op)
@@ -4521,10 +4519,8 @@ void OSD::handle_pg_backfill(OpRequestRef op)
   pg = _lookup_lock_pg(m->pgid);
   assert(pg);
 
-  pg->get();
   enqueue_op(pg, op);
   pg->unlock();
-  pg->put();
 }
 
 
@@ -5163,10 +5159,8 @@ void OSD::handle_op(OpRequestRef op)
   }
 
 
-  pg->get();
   enqueue_op(pg, op);
   pg->unlock();
-  pg->put();
 }
 
 bool OSD::op_has_sufficient_caps(PG *pg, MOSDOp *op)
@@ -5229,10 +5223,8 @@ void OSD::handle_sub_op(OpRequestRef op)
   if (!pg) {
     return;
   }
-  pg->get();
   enqueue_op(pg, op);
   pg->unlock();
-  pg->put();
 }
 
 void OSD::handle_sub_op_reply(OpRequestRef op)
@@ -5264,10 +5256,8 @@ void OSD::handle_sub_op_reply(OpRequestRef op)
   if (!pg) {
     return;
   }
-  pg->get();
   enqueue_op(pg, op);
   pg->unlock();
-  pg->put();
 }
 
 bool OSD::op_is_discardable(MOSDOp *op)
