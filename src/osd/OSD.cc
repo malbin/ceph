@@ -5340,7 +5340,7 @@ void OSD::process_peering_event(PG *pg)
     pg->lock();
     curmap = osdmap;
     map_lock.put_read();
-    if (pg->peering_queue.empty()) {
+    if (pg->deleting) {
       pg->unlock();
       return;
     }
