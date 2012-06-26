@@ -45,10 +45,10 @@ void CrushTester::set_device_weight(int dev, float f)
   device_weight[dev] = w;
 }
 
-int CrushTester::get_maximum_effected_by_rule(int ruleno){
+int CrushTester::get_maximum_affected_by_rule(int ruleno){
   /// get the number of steps in RULENO
   int rule_size = crush.get_rule_len(ruleno);
-  vector<int> effected_types;
+  vector<int> affected_types;
   map<int,int> replications_by_type;
 
   for (int i = 0; i < rule_size; i++){
@@ -58,22 +58,22 @@ int CrushTester::get_maximum_effected_by_rule(int ruleno){
     /// if the operation specifies choosing a device type, store it
     if (rule_operation >= 2 && rule_operation != 4){
       int desired_replication = crush.get_rule_arg1(ruleno,i);
-      int effected_type = crush.get_rule_arg2(ruleno,i);
-      effected_types.push_back(effected_type);
-      replications_by_type[effected_type] = desired_replication;
+      int affected_type = crush.get_rule_arg2(ruleno,i);
+      affected_types.push_back(affected_type);
+      replications_by_type[affected_type] = desired_replication;
     }
 
   }
 
-  /// now for each of the effected bucket types, see what is the
+  /// now for each of the affected bucket types, see what is the
   /// maximum we are (a) requesting or (b) have
 
   map<int,int> max_devices_of_type;
 
 
-  /// loop through the vector of effected types
-  for (vector<int>::iterator it = effected_types.begin(); it != effected_types.end(); ++it){
-    /// loop through the number of buckets looking for effected types
+  /// loop through the vector of affected types
+  for (vector<int>::iterator it = affected_types.begin(); it != affected_types.end(); ++it){
+    /// loop through the number of buckets looking for affected types
     for (map<int,string>::iterator p = crush.name_map.begin(); p != crush.name_map.end(); p++){
       int bucket_type = crush.get_bucket_type(p->first);
 
@@ -83,7 +83,7 @@ int CrushTester::get_maximum_effected_by_rule(int ruleno){
     }
   }
 
-  for(std::vector<int>::iterator it = effected_types.begin(); it != effected_types.end(); ++it){
+  for(std::vector<int>::iterator it = affected_types.begin(); it != affected_types.end(); ++it){
 
     if ( replications_by_type[*it] > 0 && replications_by_type[*it] < max_devices_of_type[*it] )
       max_devices_of_type[*it] = replications_by_type[*it];
@@ -91,14 +91,14 @@ int CrushTester::get_maximum_effected_by_rule(int ruleno){
 
   /// get the smallest number of buckets available of any type as this is our upper bound on
   /// the number of replicas we can place
-  int max_effected = max( crush.get_max_buckets(), crush.get_max_devices() );
+  int max_affected = max( crush.get_max_buckets(), crush.get_max_devices() );
 
-  for(std::vector<int>::iterator it = effected_types.begin(); it != effected_types.end(); ++it){
-    if (max_devices_of_type[*it] > 0 && max_devices_of_type[*it] < max_effected )
-      max_effected = max_devices_of_type[*it];
+  for(std::vector<int>::iterator it = affected_types.begin(); it != affected_types.end(); ++it){
+    if (max_devices_of_type[*it] > 0 && max_devices_of_type[*it] < max_affected )
+      max_affected = max_devices_of_type[*it];
   }
 
-  return max_effected;
+  return max_affected;
 
 }
 
@@ -217,17 +217,17 @@ bool CrushTester::check_valid_placement(int ruleno, vector<int> out, const vecto
 
   /// get the number of steps in RULENO
   int rule_size = crush.get_rule_len(ruleno);
-  vector<string> effected_types;
+  vector<string> affected_types;
 
-  /// get the types of devices effected by RULENO
+  /// get the types of devices affected by RULENO
   for (int i = 0; i < rule_size; i++){
     /// get what operation is done by the current step
     int rule_operation = crush.get_rule_op(ruleno, i);
 
     /// if the operation specifies choosing a device type, store it
     if (rule_operation >= 2 && rule_operation != 4){
-      int effected_type = crush.get_rule_arg2(ruleno,i);
-      effected_types.push_back( crush.get_type_name(effected_type));
+      int affected_type = crush.get_rule_arg2(ruleno,i);
+      affected_types.push_back( crush.get_type_name(affected_type));
     }
   }
 
@@ -241,7 +241,7 @@ bool CrushTester::check_valid_placement(int ruleno, vector<int> out, const vecto
     map<string,string> device_location_hierarchy = crush.get_full_location(*it);
 
     /// loop over the types affected by RULENO looking for duplicate bucket assignments
-    for (vector<string>::iterator t = effected_types.begin(); t != effected_types.end(); t++){
+    for (vector<string>::iterator t = affected_types.begin(); t != affected_types.end(); t++){
       if (seen_devices.count( device_location_hierarchy[*t] ) ){
         valid_placement = false;
         break;
@@ -278,7 +278,7 @@ vector<int> CrushTester::random_placement(int ruleno, vector<int>& out, int maxo
 
 
   // determine the real maximum number of devices to return
-  int devices_requested = min(maxout, get_maximum_effected_by_rule(ruleno));
+  int devices_requested = min(maxout, get_maximum_affected_by_rule(ruleno));
   bool accept_placement = false;
 
   vector<int> trial_placement(devices_requested);
@@ -406,7 +406,7 @@ int CrushTester::test()
         total_weight += weight[i];
 
       // compute the expected number of objects stored per device in the absence of weighting
-      float expected_objects = min(nr, get_maximum_effected_by_rule(r)) * num_objects;
+      float expected_objects = min(nr, get_maximum_affected_by_rule(r)) * num_objects;
 
       // compute each device's proportional weight
       vector<float> proportional_weights( per.size() );
@@ -433,7 +433,7 @@ int CrushTester::test()
           objects_per_batch = (batch_max - batch_min + 1);
         }
 
-        float batch_expected_objects = min(nr, get_maximum_effected_by_rule(r)) * objects_per_batch;
+        float batch_expected_objects = min(nr, get_maximum_affected_by_rule(r)) * objects_per_batch;
         vector<float> batch_num_objects_expected( per.size() );
 
         for (unsigned i = 0; i < per.size() ; i++)
