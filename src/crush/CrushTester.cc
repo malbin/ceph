@@ -45,22 +45,79 @@ void CrushTester::set_device_weight(int dev, float f)
   device_weight[dev] = w;
 }
 
-vector <__u32> CrushTester::compact_device_weights(vector <__u32> weight)
-{
-  vector<__u32> compact_weight;
-  __u32 num_to_check = weight.size();
-  int last_id_used = 0;
+int CrushTester::get_maximum_effected_by_rule(int ruleno){
+  /// get the number of steps in RULENO
+  int rule_size = crush.get_rule_len(ruleno);
+  vector<int> effected_types;
+  map<int,int> replications_by_type;
 
-  for (__u32 i = 0; i < num_to_check; i++){
-    if (weight[i] > 0){
-      compact_weight.push_back( weight[i]);
+  for (int i = 0; i < rule_size; i++){
+    /// get what operation is done by the current step
+    int rule_operation = crush.get_rule_op(ruleno, i);
+
+    /// if the operation specifies choosing a device type, store it
+    if (rule_operation >= 2 && rule_operation != 4){
+      int desired_replication = crush.get_rule_arg1(ruleno,i);
+      int effected_type = crush.get_rule_arg2(ruleno,i);
+      effected_types.push_back(effected_type);
+      replications_by_type[effected_type] = desired_replication;
     }
-    else if (weight[i] == 0){
+
+  }
+
+  /// now for each of the effected bucket types, see what is the
+  /// maximum we are (a) requesting or (b) have
+
+  map<int,int> max_devices_of_type;
+
+
+  /// loop through the vector of effected types
+  for (vector<int>::iterator it = effected_types.begin(); it != effected_types.end(); ++it){
+    /// loop through the number of buckets looking for effected types
+    for (map<int,string>::iterator p = crush.name_map.begin(); p != crush.name_map.end(); p++){
+      int bucket_type = crush.get_bucket_type(p->first);
+
+      if ( bucket_type == *it)
+        max_devices_of_type[*it]++;
 
     }
   }
 
-  return compact_weight;
+  for(std::vector<int>::iterator it = effected_types.begin(); it != effected_types.end(); ++it){
+
+    if ( replications_by_type[*it] > 0 && replications_by_type[*it] < max_devices_of_type[*it] )
+      max_devices_of_type[*it] = replications_by_type[*it];
+  }
+
+  /// get the smallest number of buckets available of any type as this is our upper bound on
+  /// the number of replicas we can place
+  int max_effected = max( crush.get_max_buckets(), crush.get_max_devices() );
+
+  for(std::vector<int>::iterator it = effected_types.begin(); it != effected_types.end(); ++it){
+    if (max_devices_of_type[*it] > 0 && max_devices_of_type[*it] < max_effected )
+      max_effected = max_devices_of_type[*it];
+  }
+
+  return max_effected;
+
+}
+
+
+map<int,int> CrushTester::get_collapsed_map(){
+  int num_to_check = crush.get_max_devices();
+  int next_id = 0;
+  map<int, int> collapse_mask;
+
+
+  //err << "we think there are " << num_to_check << std::endl;
+  for (int i = 0; i < num_to_check; i++){
+    if (crush.check_item_present(i)){
+      collapse_mask[i] = next_id;
+      next_id++;
+    }
+  }
+  
+  return collapse_mask;
 }
 
 
@@ -143,6 +200,7 @@ int CrushTester::test()
     max_x = 1023;
   }
 
+
   // initial osd weights
   vector<__u32> weight;
   for (int o = 0; o < crush.get_max_devices(); o++) {
@@ -152,25 +210,21 @@ int CrushTester::test()
       weight.push_back(0x10000);
     } else {
       weight.push_back(0);
+      continue;
     }
   }
   if (output_utilization_all)
     err << "devices weights (hex): " << hex << weight << dec << std::endl;
 
-  // test ability to retrieve item parent information
-  if (output_utilization_all)
-    for (int j = 0; j < weight.size(); j++)
-      err << "device " << j << " is located at " << crush.get_loc(j) << endl;
 
   // make adjustments
   adjust_weights(weight);
 
-  // create a temporary vector to hold a weight vector with no devices marked out
-  vector<__u32> compacted_weight = compact_device_weights(weight);
 
   int num_devices_active = 0;
   for (vector<__u32>::iterator p = weight.begin(); p != weight.end(); ++p)
-    num_devices_active++;
+    if (*p > 0)
+      num_devices_active++;
 
   if (output_choose_tries)
     crush.start_choose_profile();
