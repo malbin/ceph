@@ -443,8 +443,8 @@ int CrushTester::test()
         num_objects_expected[i] = (proportional_weights[i]*expected_objects);
 
 
-      for (int currentBatch = 0; currentBatch < num_batches; currentBatch++) {
-        if (currentBatch == (num_batches - 1)) {
+      for (int current_batch = 0; current_batch < num_batches; current_batch++) {
+        if (current_batch == (num_batches - 1)) {
           batch_max = max_x;
           objects_per_batch = (batch_max - batch_min + 1);
         }
@@ -502,6 +502,7 @@ int CrushTester::test()
           for (unsigned i = 0; i < out.size(); i++) {
             per[out[i]]++;
             temporary_per[out[i]]++;
+
 #ifdef HAVE_BOOST_RANDOM_DISCRETE_DISTRIBUTION
             if (use_crush){
               random_per[out[i]]++;
@@ -510,7 +511,7 @@ int CrushTester::test()
 #endif
           }
 
-          batchPer[currentBatch] = temporary_per;
+          batch_per[current_batch] = temporary_per;
           sizes[out.size()]++;
 
 #ifdef HAVE_BOOST_RANDOM_DISCRETE_DISTRIBUTION
@@ -519,21 +520,24 @@ int CrushTester::test()
             random_sizes[out.size()]++;
           }
 #endif
+
           if (output_bad_mappings && out.size() != (unsigned)nr) {
             cout << "bad mapping rule " << r << " x " << x << " num_rep " << nr << " result " << out << std::endl;
           }
         }
 
         // compute chi squared statistic for device examining the uniformity this batch of placements
-	for (unsigned i = 0; i < per.size(); i++)
-	  deviceTestChi[i] += pow( (temporary_per[i] - batch_num_objects_expected[i]), 2) /
+	for (unsigned i = 0; i < per.size(); i++){
+	  device_test_chi[i] += pow( (temporary_per[i] - batch_num_objects_expected[i]), 2) /
 	    batch_num_objects_expected[i];
+
 
 #ifdef HAVE_BOOST_RANDOM_DISCRETE_DISTRIBUTION
 	  random_device_test_chi[i] += pow( (random_temporary_per[i] - batch_num_objects_expected[i]), 2) /
 	    batch_num_objects_expected[i];
 #endif
       }
+
 	batch_min = batch_max + 1;
 	batch_max = batch_min + objects_per_batch - 1;
       }
@@ -558,19 +562,25 @@ int CrushTester::test()
 
             if (use_crush)
               random_test_chi_statistic += pow((random_per[i] - num_objects_expected[i] ),2) / (float) num_objects_expected[i];
+
           }
+
+
       int num_devices_failing_at_five_percent = 0;
       int num_devices_failing_at_one_percent = 0;
-      
+
+
       for (unsigned i = 0; i < per.size(); i++) {
-        if (deviceTestChi[i] > batch_chi_statistic_five_percent)
+        if (device_test_chi[i] > batch_chi_statistic_five_percent)
           num_devices_failing_at_five_percent++;
-        if (deviceTestChi[i] > batch_chi_statistic_one_percent)
+        if (device_test_chi[i] > batch_chi_statistic_one_percent)
           num_devices_failing_at_one_percent++;
       }
+
       if (use_crush){
         int random_num_devices_failing_at_five_percent = 0;
         int random_num_devices_failing_at_one_percent = 0;
+
         for (unsigned i = 0; i < per.size(); i++) {
           if (random_device_test_chi[i] > batch_chi_statistic_five_percent)
             random_num_devices_failing_at_five_percent++;
@@ -578,6 +588,7 @@ int CrushTester::test()
             random_num_devices_failing_at_one_percent++;
         }
       }
+
 
 #endif      
 
@@ -589,7 +600,7 @@ int CrushTester::test()
                   << "\t" << " stored " << ": " << per[i]
                   << "\t" << " expected " << ": " << num_objects_expected[i]
 #ifdef HAVE_BOOST_RANDOM_DISCRETE_DISTRIBUTION
-                  << "\t" << " X^2 " << ": " << deviceTestChi[i]
+                  << "\t" << " X^2 " << ": " << device_test_chi[i]
                   << "\t" << " critical (5% confidence) " << ": " << batch_chi_statistic_five_percent
                   << "\t" << " (1% confidence) " << ": " << batch_chi_statistic_one_percent
 #endif
@@ -600,7 +611,7 @@ int CrushTester::test()
                 << "\t" << " stored " << ": " << per[i]
                 << "\t" << " expected " << ": " << num_objects_expected[i]
 #ifdef HAVE_BOOST_RANDOM_DISCRETE_DISTRIBUTION
-                << "\t" << " X^2 " << ": " << deviceTestChi[i]
+                << "\t" << " X^2 " << ": " << device_test_chi[i]
                 << "\t" << " critical X^2 (5% confidence) " << ": " << batch_chi_statistic_five_percent
                 << "\t" << " (1% confidence) " << ": " << batch_chi_statistic_one_percent
 #endif
