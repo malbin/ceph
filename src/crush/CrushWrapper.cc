@@ -142,7 +142,7 @@ map<string, string> CrushWrapper::get_full_location(int id){
   map<string,string>::iterator it = parent_coord.begin();
 
   full_location[ (*it).first ] = (*it).second;
-  parent_id = get_item_id( (*it).second );
+  parent_id = get_item_id( ((*it).second).c_str() );
 
 
   while( (*it).first != high_type_name ) {
@@ -154,7 +154,7 @@ map<string, string> CrushWrapper::get_full_location(int id){
     full_location[ (*it).first ] = (*it).second;
 
     if ( (*it).first != high_type_name ){
-      parent_id = get_item_id( (*it).second );
+      parent_id = get_item_id( ((*it).second).c_str() );
     }
 
   } ;
@@ -190,7 +190,7 @@ map<int, string> CrushWrapper::get_parent_hierarchy(int id){
 
 
   map<string,string>::iterator it = parent_coord.begin();
-  parent_id = get_item_id( (*it).second );
+  parent_id = get_item_id( ((*it).second).c_str() );
 
 
   while( type_counter < high_type ) {
@@ -202,7 +202,7 @@ map<int, string> CrushWrapper::get_parent_hierarchy(int id){
       /// get the coordinate information for the next parent
       parent_coord = get_loc(parent_id);
       it = parent_coord.begin();
-      parent_id = get_item_id( (*it).second );
+      parent_id = get_item_id( ((*it).second).c_str() );
     }
   } ;
 

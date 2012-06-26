@@ -366,21 +366,37 @@ int CrushTester::test()
       vector<int> per(crush.get_max_devices());
       map<int,int> sizes;
       
+
+#ifdef HAVE_BOOST_RANDOM_DISCRETE_DISTRIBUTION
+      vector<int> random_per(crush.get_max_devices());
+      map<int,int> random_sizes;
+#endif
+
       int num_objects = ((max_x - min_x) + 1);
       float num_devices = (float) per.size(); // get the total number of devices, better to cast as a float here 
 
 #ifdef HAVE_BOOST_RANDOM_DISCRETE_DISTRIBUTION
       float test_chi_statistic = 0.0; // our observed chi squared statistic
       
+
+      float random_test_chi_statistic = 0.0;
+
       // look up the maximum expected chi squared statistic for the 5% and 1% confidence levels
       float chi_statistic_five_percent = quantile(complement(chi_squared(num_devices_active-1), 0.05));
       float chi_statistic_one_percent = quantile(complement(chi_squared(num_devices_active-1), 0.01));
 #endif
       
       // create a map to hold batch-level placement information
-      map<int, vector<int> > batchPer; 
-      vector <float> deviceTestChi (per.size() );
-      
+      map<int, vector<int> > batch_per;
+      vector <float> device_test_chi (per.size() );
+
+#ifdef HAVE_BOOST_RANDOM_DISCRETE_DISTRIBUTION
+
+      map<int, vector<int> > random_batch_per;
+      vector <float> random_device_test_chi (per.size() );
+
+#endif
+
       int objects_per_batch = num_objects / num_batches;
       
       int batch_min = min_x;
@@ -388,7 +404,7 @@ int CrushTester::test()
       
       
 #ifdef HAVE_BOOST_RANDOM_DISCRETE_DISTRIBUTION
-      // placeholders for the reference values, we will probably SEGFAULT if we try zero degrees of freedom
+      // place holders for the reference values, we will probably SEGFAULT if we try zero degrees of freedom
       float batch_chi_statistic_five_percent = -1.0;
       float batch_chi_statistic_one_percent = -1.0;
       
@@ -442,24 +458,37 @@ int CrushTester::test()
         // create a vector to hold placement results temporarily 
         vector<int> temporary_per ( per.size() );
 
+
+#ifdef HAVE_BOOST_RANDOM_DISCRETE_DISTRIBUTION
+        vector<int> random_temporary_per ( per.size() );
+#endif
+
         for (int x = batch_min; x <= batch_max; x++) {
 
           // create a vector to hold the results of a CRUSH placement or RNG simulation
           vector<int> out;
           
+
           if (use_crush) {
             if (output_statistics)
               err << "CRUSH"; // prepend CRUSH to placement output
             crush.do_rule(r, x, out, nr, weight);
+
+#ifdef HAVE_BOOST_RANDOM_DISCRETE_DISTRIBUTION
+            // a vector to hold the RNG values
+            vector<int> random_out;
+            random_placement(r, random_out, nr, weight);
+#endif
+
           } else {
+
+#ifdef HAVE_BOOST_RANDOM_DISCRETE_DISTRIBUTION
             if (output_statistics)
               err << "RNG"; // prepend RNG to placement output to denote simulation
 
-#ifdef HAVE_BOOST_RANDOM_DISCRETE_DISTRIBUTION
+
             /// test our new monte carlo placement generator
             random_placement(r, out, nr, weight);
-
-
 #endif
           }
 
@@ -473,11 +502,23 @@ int CrushTester::test()
           for (unsigned i = 0; i < out.size(); i++) {
             per[out[i]]++;
             temporary_per[out[i]]++;
+#ifdef HAVE_BOOST_RANDOM_DISCRETE_DISTRIBUTION
+            if (use_crush){
+              random_per[out[i]]++;
+              random_temporary_per[out[i]]++;
+            }
+#endif
           }
 
           batchPer[currentBatch] = temporary_per;
           sizes[out.size()]++;
 
+#ifdef HAVE_BOOST_RANDOM_DISCRETE_DISTRIBUTION
+          if (use_crush){
+            random_batch_per[current_batch] = temporary_per;
+            random_sizes[out.size()]++;
+          }
+#endif
           if (output_bad_mappings && out.size() != (unsigned)nr) {
             cout << "bad mapping rule " << r << " x " << x << " num_rep " << nr << " result " << out << std::endl;
           }
@@ -488,6 +529,11 @@ int CrushTester::test()
 	  deviceTestChi[i] += pow( (temporary_per[i] - batch_num_objects_expected[i]), 2) /
 	    batch_num_objects_expected[i];
 
+#ifdef HAVE_BOOST_RANDOM_DISCRETE_DISTRIBUTION
+	  random_device_test_chi[i] += pow( (random_temporary_per[i] - batch_num_objects_expected[i]), 2) /
+	    batch_num_objects_expected[i];
+#endif
+      }
 	batch_min = batch_max + 1;
 	batch_max = batch_min + objects_per_batch - 1;
       }
@@ -507,9 +553,12 @@ int CrushTester::test()
 #ifdef HAVE_BOOST_RANDOM_DISCRETE_DISTRIBUTION
       // compute our overall test chi squared statistic examining the final distribution of placements
       for (unsigned i = 0; i < per.size(); i++)
-          if (num_objects_expected[i] > 0)
-            test_chi_statistic += pow((num_objects_expected[i] - per[i]),2) / (float) num_objects_expected[i];
+          if (num_objects_expected[i] > 0){
+            test_chi_statistic += pow((per[i] - num_objects_expected[i] ),2) / (float) num_objects_expected[i];
 
+            if (use_crush)
+              random_test_chi_statistic += pow((random_per[i] - num_objects_expected[i] ),2) / (float) num_objects_expected[i];
+          }
       int num_devices_failing_at_five_percent = 0;
       int num_devices_failing_at_one_percent = 0;
       
@@ -519,6 +568,17 @@ int CrushTester::test()
         if (deviceTestChi[i] > batch_chi_statistic_one_percent)
           num_devices_failing_at_one_percent++;
       }
+      if (use_crush){
+        int random_num_devices_failing_at_five_percent = 0;
+        int random_num_devices_failing_at_one_percent = 0;
+        for (unsigned i = 0; i < per.size(); i++) {
+          if (random_device_test_chi[i] > batch_chi_statistic_five_percent)
+            random_num_devices_failing_at_five_percent++;
+          if (device_test_chi[i] > batch_chi_statistic_one_percent)
+            random_num_devices_failing_at_one_percent++;
+        }
+      }
+
 #endif      
 
       if (output_statistics)
