@@ -189,6 +189,121 @@ void CrushTester::adjust_weights(vector<__u32>& weight)
 #endif
 }
 
+
+
+bool CrushTester::check_valid_placement(int ruleno, vector<int> out, const vector<__u32>& weight){
+
+  bool valid_placement = true;
+  vector<int> included_devices;
+  map<string,string> seen_devices;
+
+  // first do the easy check that all devices are "up"
+
+  for (vector<int>::iterator it = out.begin(); it != out.end(); it++){
+    if (weight[*it] == 0){
+      valid_placement = false;
+      break;
+    } else if (weight[*it] != 0) {
+      included_devices.push_back(*it);
+    }
+
+  }
+
+  /*
+   * now do the harder test of checking that the CRUSH rule r is not violated
+   * we could test that none of the devices mentioned in out are unique,
+   * but this is a special case of this test
+   */
+
+  /// get the number of steps in RULENO
+  int rule_size = crush.get_rule_len(ruleno);
+  vector<string> effected_types;
+
+  /// get the types of devices effected by RULENO
+  for (int i = 0; i < rule_size; i++){
+    /// get what operation is done by the current step
+    int rule_operation = crush.get_rule_op(ruleno, i);
+
+    /// if the operation specifies choosing a device type, store it
+    if (rule_operation >= 2 && rule_operation != 4){
+      int effected_type = crush.get_rule_arg2(ruleno,i);
+      effected_types.push_back( crush.get_type_name(effected_type));
+    }
+  }
+
+
+  /// loop through the devices that are "in/up"
+  for (vector<int>::iterator it = included_devices.begin(); it != included_devices.end(); it++){
+    if (valid_placement == false)
+      break;
+
+    /// create a temporary map of the form (device type, device name in map)
+    map<string,string> device_location_hierarchy = crush.get_full_location(*it);
+
+    /// loop over the types affected by RULENO looking for duplicate bucket assignments
+    for (vector<string>::iterator t = effected_types.begin(); t != effected_types.end(); t++){
+      if (seen_devices.count( device_location_hierarchy[*t] ) ){
+        valid_placement = false;
+        break;
+      } else {
+        /// store the devices we have seen in the form of (device name, device type)
+        seen_devices[ device_location_hierarchy[*t] ] = *t ;
+      }
+      }
+    }
+
+  return valid_placement;
+}
+
+
+
+vector<int> CrushTester::random_placement(int ruleno, vector<int>& out, int maxout, vector<__u32>& weight){
+  // get the total weight of the system
+  int total_weight = 0;
+
+  for (unsigned i = 0; i < weight.size(); i++)
+    total_weight += weight[i];
+
+  // compute each device's proportional weight
+  vector<float> proportional_weights( weight.size() );
+
+  for (unsigned i = 0; i < weight.size(); i++)
+    proportional_weights[i] = (float) weight[i] / (float) total_weight;
+
+
+#ifdef HAVE_BOOST_RANDOM_DISCRETE_DISTRIBUTION
+  // create a random number generator with the device weights to use for simulating placements
+  boost::random::discrete_distribution<> dist(proportional_weights);
+#endif
+
+
+  // determine the real maximum number of devices to return
+  int devices_requested = min(maxout, get_maximum_effected_by_rule(ruleno));
+  bool accept_placement = false;
+
+  vector<int> trial_placement(devices_requested);
+  do {
+    // create a vector to hold our trial mappings
+    int temp_array[devices_requested];
+
+
+    for (int i = 0; i < devices_requested; i++){
+      temp_array[i] = dist(gen);
+    }
+
+    trial_placement.assign(temp_array, temp_array + devices_requested);
+    accept_placement = check_valid_placement(ruleno, trial_placement, weight);
+
+  } while (accept_placement == false);
+
+  /// save our random placement to the out vector
+  out.assign(trial_placement.begin(), trial_placement.end());
+  return trial_placement;
+}
+
+
+
+
 int CrushTester::test()
 {
   if (min_rule < 0 || max_rule < 0) {
@@ -291,7 +406,7 @@ int CrushTester::test()
         total_weight += weight[i];
 
       // compute the expected number of objects stored per device in the absence of weighting
-      float expected_objects = min(nr, num_devices_active) * num_objects;
+      float expected_objects = min(nr, get_maximum_effected_by_rule(r)) * num_objects;
 
       // compute each device's proportional weight
       vector<float> proportional_weights( per.size() );
@@ -318,7 +433,7 @@ int CrushTester::test()
           objects_per_batch = (batch_max - batch_min + 1);
         }
 
-        float batch_expected_objects = min(nr, num_devices_active) * objects_per_batch;
+        float batch_expected_objects = min(nr, get_maximum_effected_by_rule(r)) * objects_per_batch;
         vector<float> batch_num_objects_expected( per.size() );
 
         for (unsigned i = 0; i < per.size() ; i++)
@@ -335,22 +450,26 @@ int CrushTester::test()
           if (use_crush) {
             if (output_statistics)
               err << "CRUSH"; // prepend CRUSH to placement output
-            crush.do_rule(r, x, out, nr, compacted_weight);
+            crush.do_rule(r, x, out, nr, weight);
           } else {
             if (output_statistics)
               err << "RNG"; // prepend RNG to placement output to denote simulation
 
 #ifdef HAVE_BOOST_RANDOM_DISCRETE_DISTRIBUTION
-            // fill our vector with random numbers representing an OSD ID
-            // one day we'll worry about duplicate entries, probably
-            for (int j = 0; j < nr; j++)
-              out.push_back( dist(gen) );
+            /// test our new monte carlo placement generator
+            random_placement(r, out, nr, weight);
+
+
 #endif
           }
 
 
-          if (output_statistics)
+          if (output_statistics){
             err << " rule " << r << " x " << x << " " << out << std::endl;
+
+          }
+
+
           for (unsigned i = 0; i < out.size(); i++) {
             per[out[i]]++;
             temporary_per[out[i]]++;
