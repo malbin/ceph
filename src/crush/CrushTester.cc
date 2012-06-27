@@ -200,14 +200,19 @@ bool CrushTester::check_valid_placement(int ruleno, vector<int> out, const vecto
   // first do the easy check that all devices are "up"
 
   for (vector<int>::iterator it = out.begin(); it != out.end(); it++){
-    if (weight[*it] == 0){
+    if (weight[(*it)] == 0){
       valid_placement = false;
       break;
-    } else if (weight[*it] != 0) {
-      included_devices.push_back(*it);
+    }
+
+    else if (weight[(*it)] > 0) {
+      included_devices.push_back( (*it) );
+
     }
 
   }
+
+
 
   /*
    * now do the harder test of checking that the CRUSH rule r is not violated
@@ -218,6 +223,18 @@ bool CrushTester::check_valid_placement(int ruleno, vector<int> out, const vecto
   /// get the number of steps in RULENO
   int rule_size = crush.get_rule_len(ruleno);
   vector<string> affected_types;
+
+  /// get the smallest type id, and name
+  int min_map_type = crush.get_num_type_names();
+
+  for (map<int,string>::iterator it = crush.type_map.begin(); it != crush.type_map.end(); it++ ){
+    if ( (*it).first < min_map_type ){
+      min_map_type = (*it).first;
+    }
+  }
+
+  string min_map_type_name = crush.type_map[min_map_type];
+
 
   /// get the types of devices affected by RULENO
   for (int i = 0; i < rule_size; i++){
@@ -232,32 +249,54 @@ bool CrushTester::check_valid_placement(int ruleno, vector<int> out, const vecto
   }
 
 
-  /// loop through the devices that are "in/up"
+  /// find out if we are only dealing with osd's
+  bool only_osd_affected;
+  if (affected_types.size() == 1){
+    if ( (affected_types.back() == min_map_type_name) && (min_map_type_name == "osd") ){
+      only_osd_affected = true;
+    }
+  }
+
+  /// check that we don't have any duplicate id's
   for (vector<int>::iterator it = included_devices.begin(); it != included_devices.end(); it++){
-    if (valid_placement == false)
-      break;
+    int num_copies = count(included_devices.begin(), included_devices.end(), (*it) );
+    if (num_copies > 1){
+      valid_placement = false;
+    }
+  }
 
-    /// create a temporary map of the form (device type, device name in map)
-    map<string,string> device_location_hierarchy = crush.get_full_location(*it);
-
-    /// loop over the types affected by RULENO looking for duplicate bucket assignments
-    for (vector<string>::iterator t = affected_types.begin(); t != affected_types.end(); t++){
-      if (seen_devices.count( device_location_hierarchy[*t] ) ){
-        valid_placement = false;
+  /// if we have more than just osd's affected we need to do a lot more work
+  if (!only_osd_affected){
+    /// loop through the devices that are "in/up"
+    for (vector<int>::iterator it = included_devices.begin(); it != included_devices.end(); it++){
+      if (valid_placement == false)
         break;
-      } else {
-        /// store the devices we have seen in the form of (device name, device type)
-        seen_devices[ device_location_hierarchy[*t] ] = *t ;
-      }
+
+      /// create a temporary map of the form (device type, device name in map)
+      map<string,string> device_location_hierarchy = crush.get_full_location(*it);
+
+      /// loop over the types affected by RULENO looking for duplicate bucket assignments
+      for (vector<string>::iterator t = affected_types.begin(); t != affected_types.end(); t++){
+        if (seen_devices.count( device_location_hierarchy[*t] ) ){
+          valid_placement = false;
+          break;
+        } else {
+          /// store the devices we have seen in the form of (device name, device type)
+          seen_devices[ device_location_hierarchy[*t] ] = *t ;
+        }
       }
     }
+  }
+
+
+
 
   return valid_placement;
 }
 
 
 
-vector<int> CrushTester::random_placement(int ruleno, vector<int>& out, int maxout, vector<__u32>& weight){
+void CrushTester::random_placement(int ruleno, vector<int>& out, int maxout, vector<__u32>& weight){
   // get the total weight of the system
   int total_weight = 0;
 
@@ -298,7 +337,7 @@ vector<int> CrushTester::random_placement(int ruleno, vector<int>& out, int maxo
 
   /// save our random placement to the out vector
   out.assign(trial_placement.begin(), trial_placement.end());
-  return trial_placement;
+
 }
 
 
