@@ -457,7 +457,7 @@ void ReplicatedPG::do_pg_op(OpRequestRef op)
 
 	hobject_t next;
 	hobject_t current = response.handle;
-	osr.flush();
+	osr->flush();
 	int r = osd->store->collection_list_partial(coll, current,
 						    list_size,
 						    list_size,
@@ -1122,7 +1122,7 @@ void ReplicatedPG::do_scan(OpRequestRef op)
   case MOSDPGScan::OP_SCAN_GET_DIGEST:
     {
       BackfillInterval bi;
-      osr.flush();
+      osr->flush();
       scan_range(m->begin, g_conf->osd_backfill_scan_min, g_conf->osd_backfill_scan_max, &bi);
       MOSDPGScan *reply = new MOSDPGScan(MOSDPGScan::OP_SCAN_DIGEST,
 					 get_osdmap()->get_epoch(), m->query_epoch,
@@ -1199,7 +1199,7 @@ void ReplicatedPG::do_backfill(OpRequestRef op)
 
       ObjectStore::Transaction *t = new ObjectStore::Transaction;
       write_info(*t);
-      int tr = osd->store->queue_transaction(&osr, t);
+      int tr = osd->store->queue_transaction(osr.get(), t);
       assert(tr == 0);
     }
     break;
@@ -1244,7 +1244,7 @@ bool ReplicatedPG::get_obs_to_trim(snapid_t &snap_to_trim,
   }
 
   // flush pg ops to fs so we can rely on collection_list()
-  osr.flush();
+  osr->flush();
 
   osd->store->collection_list(col_to_trim, obs_to_trim);
 
@@ -1399,9 +1399,14 @@ ReplicatedPG::RepGather *ReplicatedPG::trim_object(const hobject_t &coid,
   return repop;
 }
 
-bool ReplicatedPG::snap_trimmer()
+void ReplicatedPG::snap_trimmer()
 {
   lock();
+  if (deleting) {
+    unlock();
+    put();
+    return;
+  }
   dout(10) << "snap_trimmer entry" << dendl;
   if (is_primary()) {
     entity_inst_t nobody;
@@ -1410,7 +1415,7 @@ bool ReplicatedPG::snap_trimmer()
       queue_snap_trim();
       unlock();
       put();
-      return true;
+      return;
     }
     if (!scrub_block_writes) {
       dout(10) << "snap_trimmer posting" << dendl;
@@ -1433,7 +1438,7 @@ bool ReplicatedPG::snap_trimmer()
   }
   unlock();
   put();
-  return true;
+  return;
 }
 
 int ReplicatedPG::do_xattr_cmp_u64(int op, __u64 v1, bufferlist& xattr)
@@ -3364,7 +3369,7 @@ void ReplicatedPG::apply_repop(RepGather *repop)
   Context *onapplied = new C_OSD_OpApplied(this, repop);
   Context *onapplied_sync = new C_OSD_OndiskWriteUnlock(repop->obc,
 							repop->ctx->clone_obc);
-  int r = osd->store->queue_transactions(&osr, repop->tls, onapplied, oncommit, onapplied_sync, repop->ctx->op);
+  int r = osd->store->queue_transactions(osr.get(), repop->tls, onapplied, oncommit, onapplied_sync, repop->ctx->op);
   if (r) {
     derr << "apply_repop  queue_transactions returned " << r << " on " << *repop << dendl;
     assert(0);
@@ -4257,7 +4262,7 @@ void ReplicatedPG::sub_op_modify(OpRequestRef op)
   
   Context *oncommit = new C_OSD_RepModifyCommit(rm);
   Context *onapply = new C_OSD_RepModifyApply(rm);
-  int r = osd->store->queue_transactions(&osr, rm->tls, onapply, oncommit, 0, op);
+  int r = osd->store->queue_transactions(osr.get(), rm->tls, onapply, oncommit, 0, op);
   if (r) {
     dout(0) << "error applying transaction: r = " << r << dendl;
     assert(0);
@@ -4953,7 +4958,7 @@ void ReplicatedPG::handle_pull_response(OpRequestRef op)
   }
 
   int r = osd->store->
-    queue_transaction(&osr, t,
+    queue_transaction(osr.get(), t,
 		      onreadable,
 		      new C_OSD_CommittedPushedObject(this, op,
 						      info.history.same_interval_since,
@@ -5008,7 +5013,7 @@ void ReplicatedPG::handle_push(OpRequestRef op)
 			 t);
 
   int r = osd->store->
-    queue_transaction(&osr, t,
+    queue_transaction(osr.get(), t,
 		      onreadable,
 		      new C_OSD_CommittedPushedObject(
 			this, op,
@@ -5434,7 +5439,7 @@ void ReplicatedPG::sub_op_remove(OpRequestRef op)
 
   ObjectStore::Transaction *t = new ObjectStore::Transaction;
   remove_object_with_snap_hardlinks(*t, m->poid);
-  int r = osd->store->queue_transaction(&osr, t);
+  int r = osd->store->queue_transaction(osr.get(), t);
   assert(r == 0);
 }
 
@@ -5599,7 +5604,7 @@ void ReplicatedPG::mark_all_unfound_lost(int what)
     write_info(*t);
   }
 
-  osd->store->queue_transaction(&osr, t, c, NULL, new C_OSD_OndiskWriteUnlockList(&c->obcs));
+  osd->store->queue_transaction(osr.get(), t, c, NULL, new C_OSD_OndiskWriteUnlockList(&c->obcs));
 	      
   // Send out the PG log to all replicas
   // So that they know what is lost
@@ -5972,7 +5977,7 @@ int ReplicatedPG::recover_primary(int max)
 
 	      recover_got(soid, latest->version);
 
-	      osd->store->queue_transaction(&osr, t,
+	      osd->store->queue_transaction(osr.get(), t,
 					    new C_OSD_AppliedRecoveredObject(this, t, obc),
 					    new C_OSD_CommittedPushedObject(this, OpRequestRef(),
 									    info.history.same_interval_since,
@@ -6186,7 +6191,7 @@ int ReplicatedPG::recover_backfill(int max)
   // objects.
   dout(10) << " rescanning local backfill_info from " << backfill_pos << dendl;
   backfill_info.clear();
-  osr.flush();
+  osr->flush();
   scan_range(backfill_pos, local_min, local_max, &backfill_info);
 
   int ops = 0;
@@ -6200,7 +6205,7 @@ int ReplicatedPG::recover_backfill(int max)
   while (ops < max) {
     if (backfill_info.begin <= pbi.begin &&
 	!backfill_info.extends_to_end() && backfill_info.empty()) {
-      osr.flush();
+      osr->flush();
       scan_range(backfill_info.end, local_min, local_max, &backfill_info);
       backfill_info.trim();
     }
@@ -6719,7 +6724,7 @@ boost::statechart::result ReplicatedPG::RepColTrim::react(const SnapTrim&)
   
   // flush all operations to fs so we can rely on collection_list
   // below.
-  pg->osr.flush();
+  pg->osr->flush();
 
   vector<hobject_t> obs_to_trim;
   pg->osd->store->collection_list(col_to_trim, obs_to_trim);
@@ -6842,7 +6847,7 @@ boost::statechart::result ReplicatedPG::WaitingOnReplicas::react(const SnapTrim&
   pg->snap_collections.erase(sn);
   pg->write_info(*t);
   t->remove_collection(c);
-  int tr = pg->osd->store->queue_transaction(&pg->osr, t);
+  int tr = pg->osd->store->queue_transaction(pg->osr.get(), t);
   assert(tr == 0);
 
   context<SnapTrimmer>().need_share_pg_info = true;
