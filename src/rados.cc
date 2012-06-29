@@ -181,7 +181,7 @@ static int do_copy(IoCtx& io_ctx, const char *objname, IoCtx& target_ctx, const 
   bufferlist omap_header;
   read_op.omap_get_header(&omap_header, NULL);
 
-#define OMAP_CHUNK 1
+#define OMAP_CHUNK 1000
   map<string, bufferlist> omap;
   read_op.omap_get_vals(start_after, OMAP_CHUNK, &omap, NULL);
 
