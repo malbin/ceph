@@ -113,9 +113,189 @@ bool CrushWrapper::check_item_loc(CephContext *cct, int item, map<string,string>
   return false;
 }
 
+/*
+ * get the fully qualified location of a device by successively finding
+ * parents beginning at ID and ending at highest type number specified in
+ * the CRUSH map which assumes that if device foo is under device bar, the
+ * type_id of foo < bar where type_id is the integer specified in the CRUSH map
+ *
+ * returns the location in the form of (type=foo) where type is a type of bucket
+ * specified in the CRUSH map and foo is a name specified in the CRUSH map
+ */
+map<string, string> CrushWrapper::get_full_location(int id){
+
+  map<string,string> full_location;
+  pair<string, string> parent_coord;
+  parent_coord = get_immediate_parent(id);
+  int parent_id;
+
+  /// read the type map and get the name of the type with the largest ID
+  int high_type = 0;
+  for (map<int, string>::iterator it = type_map.begin(); it != type_map.end(); it++){
+    if ( (*it).first > high_type )
+      high_type = (*it).first;
+  }
+
+  string high_type_name = type_map[high_type];
+
+  full_location[ parent_coord.first ] = parent_coord.second;
+  parent_id = get_item_id( (parent_coord.second).c_str() );
+
+
+  while (parent_coord.first != high_type_name) {
+    parent_coord = get_immediate_parent(parent_id);
+    full_location[ parent_coord.first ] = parent_coord.second;
+    if ( parent_coord.first != high_type_name ){
+      parent_id = get_item_id( (parent_coord.second).c_str() );
+    }
+  }
+
+  return full_location;
+}
+
+
+map<int, string> CrushWrapper::get_parent_hierarchy(int id)
+{
+  map<int,string> parent_hierarchy;
+  pair<string, string> parent_coord = get_immediate_parent(id);
+  int parent_id;
+
+  // get the integer type for id and create a counter from there
+  int type_counter = get_bucket_type(id);
+
+  // if we get a negative type then we can assume that we have an OSD
+  // change behavior in get_item_type FIXME
+  if (type_counter < 0)
+    type_counter = 0;
+
+  // read the type map and get the name of the type with the largest ID
+  int high_type = 0;
+  for (map<int, string>::iterator it = type_map.begin(); it != type_map.end(); it++){
+    if ( (*it).first > high_type )
+      high_type = (*it).first;
+  }
+
+  parent_id = get_item_id((parent_coord.second).c_str());
+
+  while (type_counter < high_type) {
+    type_counter++;
+    parent_hierarchy[ type_counter ] = parent_coord.first;
+
+    if (type_counter < high_type){
+      // get the coordinate information for the next parent
+      parent_coord = get_immediate_parent(parent_id);
+      parent_id = get_item_id(parent_coord.second.c_str());
+    }
+  }
+
+  return parent_hierarchy;
+}
+
+
+
 int CrushWrapper::insert_item(CephContext *cct, int item, float weight, string name,
 			      map<string,string>& loc)  // typename -> bucketname
 {
+
+  // create a look-up table in order to create random tags later
+  static const char letter_pool[] =
+     "0123456789"
+     "abcdefghijklmnopqrstuvwxyz"
+     "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+  // set how long random tags should be
+  const static int appended_tag_length = 4;
+
+  char random_tag[appended_tag_length + 2];
+
+  int high_type = 0;
+  int empty_weight = 0;
+  int desired_type_id;
+  int parent_id;
+  int r;
+  vector<int> created_bucket_ids;
+  crush_bucket *b;
+
+  // create an iterator over the location passed in
+  map<string,string>::iterator it = loc.begin();
+  string current_name = (*it).second;
+
+  // assume that the bucket we are creating is one level below the desired location, I hate assumptions...
+  if (!have_rmaps)
+    build_rmap(type_map, type_rmap);
+
+  // get the type of bucket at the desired placement location
+  desired_type_id = type_rmap[ (*it).first ];
+  int assumed_bucket_type_id =  desired_type_id -1;
+
+
+  if (!name_exists( current_name.c_str()) && type_map.count(desired_type_id)){
+
+    // if we have to create a series of buckets, the first item we are adding is actually a bucket
+    if (assumed_bucket_type_id > 0 ) {
+      int empty_items;
+      add_bucket(item, CRUSH_BUCKET_STRAW, CRUSH_HASH_DEFAULT, assumed_bucket_type_id, 1, &empty_items, &empty_weight);
+    }
+
+    // just in case there is something weird going on in the type_map
+    for (map<int,string>::iterator l = type_map.begin(); l != type_map.end(); l++){
+      if ( (*l).first > high_type )
+        high_type = (*l).first;
+    }
+
+    // calculate how many buckets we need to make between the desired_location and root
+    int distance_to_root = high_type - assumed_bucket_type_id;
+
+    if (distance_to_root > 1){
+      int current_item = item;
+      for (int current_type = desired_type_id; current_type < high_type; current_type++){
+
+        // create a random tag to append to our otherwise boring name
+        for (int i = 1; i <= appended_tag_length; i++){
+          random_tag[i] = letter_pool[ rand() % (sizeof(letter_pool) -1)];
+        }
+        random_tag[appended_tag_length + 1] = 0;
+        random_tag[0] = '-';
+
+        // create a bucket
+        ldout(cct, 5) << "insert_item creating bucket " << current_name << dendl;
+        parent_id = add_bucket(0, CRUSH_BUCKET_STRAW, CRUSH_HASH_DEFAULT, current_type, 1, &current_item, &empty_weight);
+        created_bucket_ids.push_back( parent_id );
+        set_item_name(parent_id, current_name.c_str() );
+
+        // we're naming the parent bucket here, so the current_name is actually of the next type
+        current_name = (type_map[current_type + 1]+random_tag); // poor choice of variable name FIXME
+
+        // get the actual bucket we just created
+        b = get_bucket( parent_id );
+
+        ldout(cct, 5) << "insert_item adding " << current_item
+                      << " to bucket " << parent_id << dendl;
+        r = crush_bucket_add_item(b, current_item, 0);
+        assert(!r);
+        current_item = parent_id;
+
+      }
+
+      // now add the last bucket we created to the root
+      // for now assume that the root is named default, but we might want to check this someday, or give some sort of error
+      int root_id = name_rmap["default"];
+      b = get_bucket( root_id );
+
+      ldout(cct, 5) << "insert_item adding " << parent_id
+                    << " to bucket " << root_id << dendl;
+      r = crush_bucket_add_item(b, parent_id, 0);
+      assert(!r);
+
+    }
+
+    // now that we've added the (0-weighted) item and any parent buckets, adjust the weight.
+    adjust_item_weightf(cct, item, weight);
+
+    // since we added the item we wanted along with any and all parent buckets, we can probably just quit
+    return 0;
+  }
+
   ldout(cct, 5) << "insert_item item " << item << " weight " << weight
 		<< " name " << name << " loc " << loc << dendl;
 
@@ -152,7 +332,7 @@ int CrushWrapper::insert_item(CephContext *cct, int item, float weight, string n
     // add to an existing bucket
     int id = get_item_id(loc[p->second].c_str());
     if (!bucket_exists(id)) {
-      ldout(cct, 1) << "insert_item don't have bucket " << id << dendl;
+      ldout(cct, 1) << "insert_item doesn't have bucket " << id << dendl;
       return -EINVAL;
     }
 

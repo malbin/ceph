@@ -217,7 +217,22 @@ public:
   }
 
 
+  /**
+   * returns the (type, name) of the parent bucket of id
+   */
   pair<string,string> get_immediate_parent(int id);
+
+  /**
+   * returns the (type,name) of all parent buckets between id
+   * and default
+   */
+  map<string, string> get_full_location(int id);
+
+  /**
+   * returns (type_id, type) of all parent buckets between id and
+   * default, can be used to check for anomolous CRUSH maps
+   */
+  map<int, string> get_parent_hierarchy(int id);
 
 
   /**
