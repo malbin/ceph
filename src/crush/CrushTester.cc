@@ -22,7 +22,6 @@ using boost::accumulators::variance;
 using boost::accumulators::accumulator_set;
 
 // create a random number generator to simulate placements
-
 // use the mersenne twister as our seed generator
 typedef boost::mt19937 generator;
 
@@ -52,12 +51,12 @@ int CrushTester::get_maximum_affected_by_rule(int ruleno)
   vector<int> affected_types;
   map<int,int> replications_by_type;
 
-  for (int i = 0; i < rule_size; i++){
+  for (int i = 0; i < rule_size; i++) {
     // get what operation is done by the current step
     int rule_operation = crush.get_rule_op(ruleno, i);
 
     // if the operation specifies choosing a device type, store it
-    if (rule_operation >= 2 && rule_operation != 4){
+    if (rule_operation >= 2 && rule_operation != 4) {
       int desired_replication = crush.get_rule_arg1(ruleno,i);
       int affected_type = crush.get_rule_arg2(ruleno,i);
       affected_types.push_back(affected_type);
@@ -73,27 +72,27 @@ int CrushTester::get_maximum_affected_by_rule(int ruleno)
   map<int,int> max_devices_of_type;
 
   // loop through the vector of affected types
-  for (vector<int>::iterator it = affected_types.begin(); it != affected_types.end(); ++it){
+  for (vector<int>::iterator it = affected_types.begin(); it != affected_types.end(); ++it) {
     // loop through the number of buckets looking for affected types
-    for (map<int,string>::iterator p = crush.name_map.begin(); p != crush.name_map.end(); p++){
+    for (map<int,string>::iterator p = crush.name_map.begin(); p != crush.name_map.end(); p++) {
       int bucket_type = crush.get_bucket_type(p->first);
       if ( bucket_type == *it)
         max_devices_of_type[*it]++;
     }
   }
 
-  for(std::vector<int>::iterator it = affected_types.begin(); it != affected_types.end(); ++it){
-    if ( replications_by_type[*it] > 0 && replications_by_type[*it] < max_devices_of_type[*it] )
+  for(std::vector<int>::iterator it = affected_types.begin(); it != affected_types.end(); ++it) {
+    if (replications_by_type[*it] > 0 && replications_by_type[*it] < max_devices_of_type[*it])
       max_devices_of_type[*it] = replications_by_type[*it];
   }
 
   /*
    * get the smallest number of buckets available of any type as this is our upper bound on
    * the number of replicas we can place
-  */
+   */
   int max_affected = max( crush.get_max_buckets(), crush.get_max_devices() );
 
-  for(std::vector<int>::iterator it = affected_types.begin(); it != affected_types.end(); ++it){
+  for(std::vector<int>::iterator it = affected_types.begin(); it != affected_types.end(); ++it) {
     if (max_devices_of_type[*it] > 0 && max_devices_of_type[*it] < max_affected )
       max_affected = max_devices_of_type[*it];
   }
@@ -108,7 +107,7 @@ map<int,int> CrushTester::get_collapsed_mapping()
   int next_id = 0;
   map<int, int> collapse_mask;
 
-  for (int i = 0; i < num_to_check; i++){
+  for (int i = 0; i < num_to_check; i++) {
     if (crush.check_item_present(i)){
       collapse_mask[i] = next_id;
       next_id++;
@@ -172,9 +171,9 @@ void CrushTester::adjust_weights(vector<__u32>& weight)
       }
 
       int local_devices_to_visit = (int) (mark_down_device_ratio*size);
-      for (int o = 0; o < local_devices_to_visit; o++){
+      for (int o = 0; o < local_devices_to_visit; o++) {
         int item = crush.get_bucket_item(id, o);
-        weight[item] = 0;
+	weight[item] = 0;
       }
     }
   }
@@ -183,15 +182,15 @@ void CrushTester::adjust_weights(vector<__u32>& weight)
 #endif
 }
 
-bool CrushTester::check_valid_placement(int ruleno, vector<int> out, const vector<__u32>& weight){
-
+bool CrushTester::check_valid_placement(int ruleno, vector<int> out, const vector<__u32>& weight)
+{
   bool valid_placement = true;
   vector<int> included_devices;
   map<string,string> seen_devices;
 
   // first do the easy check that all devices are "up"
-  for (vector<int>::iterator it = out.begin(); it != out.end(); it++){
-    if (weight[(*it)] == 0){
+  for (vector<int>::iterator it = out.begin(); it != out.end(); it++) {
+    if (weight[(*it)] == 0) {
       valid_placement = false;
       break;
     } else if (weight[(*it)] > 0) {
@@ -220,12 +219,12 @@ bool CrushTester::check_valid_placement(int ruleno, vector<int> out, const vecto
   string min_map_type_name = crush.type_map[min_map_type];
 
   // get the types of devices affected by RULENO
-  for (int i = 0; i < rule_size; i++){
+  for (int i = 0; i < rule_size; i++) {
     // get what operation is done by the current step
     int rule_operation = crush.get_rule_op(ruleno, i);
 
     // if the operation specifies choosing a device type, store it
-    if (rule_operation >= 2 && rule_operation != 4){
+    if (rule_operation >= 2 && rule_operation != 4) {
       int affected_type = crush.get_rule_arg2(ruleno,i);
       affected_types.push_back( crush.get_type_name(affected_type));
     }
@@ -234,13 +233,13 @@ bool CrushTester::check_valid_placement(int ruleno, vector<int> out, const vecto
   // find out if we are only dealing with osd's
   bool only_osd_affected;
   if (affected_types.size() == 1){
-    if ( (affected_types.back() == min_map_type_name) && (min_map_type_name == "osd") ){
+    if ( (affected_types.back() == min_map_type_name) && (min_map_type_name == "osd") ) {
       only_osd_affected = true;
     }
   }
 
   // check that we don't have any duplicate id's
-  for (vector<int>::iterator it = included_devices.begin(); it != included_devices.end(); it++){
+  for (vector<int>::iterator it = included_devices.begin(); it != included_devices.end(); it++) {
     int num_copies = count(included_devices.begin(), included_devices.end(), (*it) );
     if (num_copies > 1){
       valid_placement = false;
@@ -248,9 +247,9 @@ bool CrushTester::check_valid_placement(int ruleno, vector<int> out, const vecto
   }
 
   // if we have more than just osd's affected we need to do a lot more work
-  if (!only_osd_affected){
+  if (!only_osd_affected) {
     // loop through the devices that are "in/up"
-    for (vector<int>::iterator it = included_devices.begin(); it != included_devices.end(); it++){
+    for (vector<int>::iterator it = included_devices.begin(); it != included_devices.end(); it++) {
       if (valid_placement == false)
         break;
 
@@ -258,8 +257,8 @@ bool CrushTester::check_valid_placement(int ruleno, vector<int> out, const vecto
       map<string,string> device_location_hierarchy = crush.get_full_location(*it);
 
       // loop over the types affected by RULENO looking for duplicate bucket assignments
-      for (vector<string>::iterator t = affected_types.begin(); t != affected_types.end(); t++){
-        if (seen_devices.count( device_location_hierarchy[*t] ) ){
+      for (vector<string>::iterator t = affected_types.begin(); t != affected_types.end(); t++) {
+        if (seen_devices.count( device_location_hierarchy[*t] ) ) {
           valid_placement = false;
           break;
         } else {
@@ -301,7 +300,7 @@ int CrushTester::random_placement(int ruleno, vector<int>& out, int maxout, vect
   do {
     // create a vector to hold our trial mappings
     int temp_array[devices_requested];
-    for (int i = 0; i < devices_requested; i++){
+    for (int i = 0; i < devices_requested; i++) {
       temp_array[i] = dist(gen);
     }
 
@@ -322,8 +321,6 @@ int CrushTester::random_placement(int ruleno, vector<int>& out, int maxout, vect
 }
 
 
-
-
 int CrushTester::test()
 {
   if (min_rule < 0 || max_rule < 0) {
@@ -334,7 +331,6 @@ int CrushTester::test()
     min_x = 0;
     max_x = 1023;
   }
-
 
   // initial osd weights
   vector<__u32> weight;
